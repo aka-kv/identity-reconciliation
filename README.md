@@ -51,7 +51,7 @@ This project follows a task-by-task implementation approach. Current status:
 
 - [x] Task 1: Basic project structure setup
 - [x] Task 2: Database models implementation  
-- [ ] Task 3: Request/response schemas
+- [x] Task 3: Request/response schemas
 - [ ] Task 4: Core business logic
 - [ ] Task 5: API endpoints
 - [ ] Task 6: AWS Lambda deployment
