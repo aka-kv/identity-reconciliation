@@ -95,7 +95,7 @@ async def root():
 @app.get("/health")
 async def health_check():
     """
-    Health check endpoint for monitoring
+    Health check endpoint for monitoring and load balancer health checks
     """
     try:
         from database import db_manager
@@ -106,8 +106,67 @@ async def health_check():
     return {
         "status": "healthy",
         "environment": settings.ENVIRONMENT,
-        "database": db_status
+        "database": db_status,
+        "version": settings.API_VERSION,
+        "endpoints": {
+            "identify": "/identify",
+            "health": "/health", 
+            "docs": "/docs"
+        }
     }
+
+@app.get("/debug/contacts")
+async def debug_contacts():
+    """
+    Debug endpoint to check database contents and recent contacts
+    """
+    try:
+        from database import db_manager
+        
+        with db_manager.get_session() as session:
+            from models import Contact
+            
+            # Count total contacts
+            total_contacts = session.query(Contact).filter(Contact.deleted_at.is_(None)).count()
+            primary_count = session.query(Contact).filter(
+                Contact.link_precedence == "primary",
+                Contact.deleted_at.is_(None)
+            ).count()
+            secondary_count = session.query(Contact).filter(
+                Contact.link_precedence == "secondary", 
+                Contact.deleted_at.is_(None)
+            ).count()
+            
+            # Get recent contacts
+            recent_contacts = session.query(Contact).filter(
+                Contact.deleted_at.is_(None)
+            ).order_by(Contact.created_at.desc()).limit(5).all()
+            
+            return {
+                "total_contacts": total_contacts,
+                "primary_contacts": primary_count,
+                "secondary_contacts": secondary_count,
+                "recent_contacts": [
+                    {
+                        "id": c.id,
+                        "email": c.email,
+                        "phone": c.phone_number,
+                        "precedence": c.link_precedence,
+                        "linked_id": c.linked_id,
+                        "created_at": c.created_at.isoformat() if c.created_at else None
+                    } for c in recent_contacts
+                ],
+                "database_status": "connected"
+            }
+            
+    except Exception as e:
+        logger.error(f"Debug endpoint error: {e}")
+        return {
+            "error": str(e),
+            "total_contacts": 0,
+            "recent_contacts": [],
+            "database_status": "error"
+        }
 
 @app.post("/identify", response_model=IdentifyResponse)
 async def identify_endpoint(request: IdentifyRequest):
@@ -125,12 +184,23 @@ async def identify_endpoint(request: IdentifyRequest):
        - New information → create secondary contact
        - Link two primaries → convert newer to secondary
     4. Return consolidated contact information
+    
+    **Examples:**
+    - New customer: Creates primary contact
+    - Existing email + new phone: Creates secondary contact
+    - Two existing primaries with shared info: Links them (older remains primary)
     """
     try:
         logger.info(f"Processing identify request: email={request.email}, phone={request.phoneNumber}")
         
+        # Validate request data one more time for endpoint-specific checks
+        await _validate_identify_request(request)
+        
         # Process the request through our identity service
         response = await identity_service.identify_contact(request)
+        
+        # Validate response before returning
+        _validate_identify_response(response)
         
         logger.info(f"Successfully processed request. Primary contact ID: {response.contact.primaryContatId}")
         
@@ -173,6 +243,75 @@ async def identify_endpoint(request: IdentifyRequest):
                 message="Unable to process identity reconciliation request"
             ).dict()
         )
+
+@app.post("/identify/test", response_model=IdentifyResponse)
+async def identify_test_endpoint(request: IdentifyRequest):
+    """
+    Test version of identify endpoint for local testing and debugging
+    Includes additional logging and validation steps
+    """
+    logger.info(f"TEST MODE: Processing identify request: email={request.email}, phone={request.phoneNumber}")
+    
+    try:
+        # Enhanced logging for test mode
+        from database import db_manager
+        with db_manager.get_session() as session:
+            from models import Contact
+            existing_count = session.query(Contact).filter(Contact.deleted_at.is_(None)).count()
+            logger.info(f"TEST MODE: Current database has {existing_count} active contacts")
+        
+        # Process request
+        response = await identity_service.identify_contact(request)
+        
+        # Additional test mode logging
+        logger.info(f"TEST MODE: Response generated with primary ID {response.contact.primaryContatId}")
+        logger.info(f"TEST MODE: Response emails: {response.contact.emails}")
+        logger.info(f"TEST MODE: Response phones: {response.contact.phoneNumbers}")
+        logger.info(f"TEST MODE: Secondary IDs: {response.contact.secondaryContactIds}")
+        
+        return response
+        
+    except Exception as e:
+        logger.error(f"TEST MODE: Error processing request: {e}")
+        raise
+
+async def _validate_identify_request(request: IdentifyRequest):
+    """
+    Additional validation for identify endpoint requests
+    """
+    # Check that at least one contact method is provided (already in schema, but double-check)
+    if not request.email and not request.phoneNumber:
+        raise HTTPException(
+            status_code=400,
+            detail=ErrorResponse(
+                error="ValidationError",
+                message="At least one of email or phoneNumber must be provided"
+            ).dict()
+        )
+    
+    # Additional business logic validation can be added here
+    logger.debug(f"Request validation passed for email={request.email}, phone={request.phoneNumber}")
+
+def _validate_identify_response(response: IdentifyResponse):
+    """
+    Validate identify response before returning to client
+    """
+    # Basic response structure validation
+    if not response.contact:
+        raise ValueError("Response missing contact information")
+    
+    if not response.contact.primaryContatId:
+        raise ValueError("Response missing primary contact ID")
+    
+    # Ensure arrays are not None
+    if response.contact.emails is None:
+        response.contact.emails = []
+    if response.contact.phoneNumbers is None:
+        response.contact.phoneNumbers = []
+    if response.contact.secondaryContactIds is None:
+        response.contact.secondaryContactIds = []
+    
+    logger.debug(f"Response validation passed for primary ID {response.contact.primaryContatId}")
 
 if __name__ == "__main__":
     import uvicorn
