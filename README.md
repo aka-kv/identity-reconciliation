@@ -56,7 +56,7 @@ This project follows a task-by-task implementation approach. Current status:
 - [x] Task 3: Request/response schemas
 - [x] Task 4: Implement basic identity service
 - [x] Task 5: Add secondary contact logic
-- [ ] Task 6: Implement primary-to-secondary conversion
+- [x] Task 6: Implement primary-to-secondary conversion
 - [ ] Task 7: Build consolidated response
 - [ ] Task 8: Create FastAPI endpoint
 - [ ] Task 9: Add comprehensive error handling

@@ -138,6 +138,20 @@ class Contact(BaseModel):
         phone_match = phone and self.phone_number == phone
         return email_match or phone_match
     
+    def can_be_converted_to_secondary(self):
+        """
+        Check if this primary contact can be safely converted to secondary
+        Used during primary-to-secondary conversion validation
+        """
+        return self.is_primary() and self.deleted_at is None
+    
+    def get_creation_priority(self):
+        """
+        Get creation priority for primary contact linking decisions
+        Earlier created contacts have higher priority (lower number)
+        """
+        return self.created_at.timestamp() if self.created_at else float('inf')
+    
     def to_dict(self):
         """Convert contact to dictionary with formatted timestamps"""
         data = super().to_dict()
