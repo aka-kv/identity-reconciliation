@@ -1,68 +1,110 @@
-# Identity Reconciliation API
+# Identity Reconciliation System
 
-Customer identity linking and reconciliation service for Bitespeed.
+A serverless backend service for tracking and linking customer identities across multiple purchases. Built with FastAPI and deployed on AWS using Lambda, RDS, and API Gateway.
+
+## AWS Architecture
+
+```
+API Gateway → AWS Lambda → RDS Proxy → PostgreSQL RDS
+```
+
+### AWS Services Used
+- **AWS Lambda**: Serverless compute for the FastAPI application
+- **Amazon RDS (PostgreSQL)**: Managed database for contact storage
+- **RDS Proxy**: Connection pooling and management for Lambda-RDS communication
+- **API Gateway**: HTTP API endpoint for external access
+- **Mangum**: ASGI adapter for FastAPI-Lambda integration
+
+## Business Logic
+
+**Identity Linking**: Links customer contacts based on email or phone number matches, maintaining the oldest contact as primary and newer matches as secondary contacts.
+
+## API Endpoint
+
+**POST /identify**
+
+```json
+{
+  "email": "customer@example.com",
+  "phoneNumber": "1234567890"
+}
+```
+
+**Response:**
+```json
+{
+  "contact": {
+    "primaryContactId": 1,
+    "emails": ["customer@example.com"],
+    "phoneNumbers": ["1234567890"],
+    "secondaryContactIds": []
+  }
+}
+```
 
 ## Project Structure
 
 ```
-identity_reconcilation/
-├── models/           # Database models (SQLAlchemy)
-├── schemas/          # Request/response schemas (Pydantic)  
-├── services/         # Business logic services
-├── config.py         # Configuration management
-├── database.py       # Database connection setup
-├── main.py           # FastAPI application entry point
-└── requirements.txt  # Python dependencies
+Bitespeed/
+├── identity_reconcilation/    # Main application package
+│   ├── models/               # SQLAlchemy database models
+│   ├── services/             # Business logic services
+│   ├── schemas/              # Pydantic request/response schemas
+│   ├── config.py            # Configuration management
+│   └── database.py          # Database connection setup
+├── lambda_handler.py        # AWS Lambda entry point
+├── main.py                  # FastAPI application
+├── requirements.txt         # Python dependencies
+└── package/                 # Lambda deployment package
 ```
 
-## Setup Instructions
+## Features
 
-1. **Install Dependencies**
+- ✅ **Serverless Architecture**: Fully deployed on AWS Lambda
+- ✅ **Identity Linking**: Smart contact consolidation logic
+- ✅ **Primary/Secondary Logic**: Maintains contact hierarchy
+- ✅ **Database Integration**: PostgreSQL with RDS Proxy
+- ✅ **Production Ready**: Deployed with API Gateway
+
+## Local Development
+
+1. **Setup Environment**:
    ```bash
+   python -m venv venv
+   venv\Scripts\activate
    pip install -r requirements.txt
    ```
 
-2. **Environment Configuration**
-   Create a `.env` file with your database configuration:
-   ```
-   DEBUG=true
-   ENVIRONMENT=development
-   DATABASE_URL=postgresql://user:password@localhost:5432/identity_db
-   ```
-
-3. **Database Setup**
-   Create the database tables:
+2. **Configure Database**:
    ```bash
-   python create_tables.py
+   export DATABASE_URL="postgresql://user:password@localhost:5432/identity_db"
    ```
 
-4. **Run the Application**
+3. **Run Locally**:
    ```bash
    python main.py
    ```
 
-4. **Access the API**
-   - API: http://localhost:8000
-   - Health Check: http://localhost:8000/health
-   - Identity Endpoint: POST http://localhost:8000/identify
-   - API Documentation: http://localhost:8000/docs
+## Deployment
 
-## Development
+The application is deployed using:
+- **Lambda Function**: Contains the packaged FastAPI application
+- **RDS Instance**: PostgreSQL database with automated backups
+- **RDS Proxy**: Manages database connections efficiently
+- **API Gateway**: Provides public HTTPS endpoint
 
-This project follows a task-by-task implementation approach. Current status:
+## Configuration
 
-- [x] Task 1: Basic project structure setup
-- [x] Task 2: Database models implementation  
-- [x] Task 3: Request/response schemas
-- [x] Task 4: Implement basic identity service
-- [x] Task 5: Add secondary contact logic
-- [x] Task 6: Implement primary-to-secondary conversion
-- [x] Task 7: Build consolidated response
-- [x] Task 8: Create FastAPI endpoint
-- [x] Task 9: Add comprehensive error handling
+Environment variables used in production:
+- `DATABASE_URL`: RDS connection string via RDS Proxy
+- `ENVIRONMENT`: production
+- `AWS_REGION`: AWS deployment region
 
-## Requirements
+## API Documentation
 
-- Python 3.7+
-- PostgreSQL database
-- FastAPI and dependencies (see requirements.txt) 
+Once deployed, access:
+- **API Endpoint**: `https://pegxaa572h.execute-api.us-east-1.amazonaws.com/identify`
+
+---
+
+*This project demonstrates a complete serverless identity reconciliation system using modern AWS services and FastAPI.* 
