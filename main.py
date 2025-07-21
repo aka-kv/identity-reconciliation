@@ -142,7 +142,6 @@ async def test_endpoint():
         "timestamp": datetime.utcnow().isoformat()
     }
 
-
 @app.get("/debug/contacts")
 async def debug_contacts():
     """
