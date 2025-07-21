@@ -44,6 +44,8 @@ identity_reconcilation/
 4. **Access the API**
    - API: http://localhost:8000
    - Health Check: http://localhost:8000/health
+   - Identity Endpoint: POST http://localhost:8000/identify
+   - API Documentation: http://localhost:8000/docs
 
 ## Development
 
@@ -52,8 +54,8 @@ This project follows a task-by-task implementation approach. Current status:
 - [x] Task 1: Basic project structure setup
 - [x] Task 2: Database models implementation  
 - [x] Task 3: Request/response schemas
-- [ ] Task 4: Core business logic
-- [ ] Task 5: API endpoints
+- [x] Task 4: Core business logic and API endpoints
+- [ ] Task 5: Testing and refinement
 - [ ] Task 6: AWS Lambda deployment
 
 ## Requirements
