@@ -88,16 +88,11 @@ class Contact(BaseModel):
     
     def __repr__(self):
         """String representation showing key contact information"""
-        contact_info = []
-        if self.email:
-            contact_info.append(f"email={self.email}")
-        if self.phone_number:
-            contact_info.append(f"phone={self.phone_number}")
-        
         return (
             f"<Contact(id={self.id}, "
-            f"{', '.join(contact_info)}, "
-            f"precedence={self.link_precedence})>"
+            f"{self.get_contact_info_summary()}, "
+            f"precedence={self.link_precedence}"
+            f"{f', linked_to={self.linked_id}' if self.is_secondary() else ''})>"
         )
     
     def is_primary(self):
@@ -116,6 +111,32 @@ class Contact(BaseModel):
         if self.is_primary():
             return self
         return self.linked_contact
+    
+    def has_email(self):
+        """Check if this contact has an email"""
+        return self.email is not None and self.email.strip() != ""
+    
+    def has_phone(self):
+        """Check if this contact has a phone number"""
+        return self.phone_number is not None and self.phone_number.strip() != ""
+    
+    def get_contact_info_summary(self):
+        """Get a summary of this contact's information"""
+        info = []
+        if self.has_email():
+            info.append(f"email:{self.email}")
+        if self.has_phone():
+            info.append(f"phone:{self.phone_number}")
+        return ", ".join(info) if info else "no contact info"
+    
+    def matches_request(self, email=None, phone=None):
+        """
+        Check if this contact matches the given email or phone
+        Used for secondary contact logic
+        """
+        email_match = email and self.email == email
+        phone_match = phone and self.phone_number == phone
+        return email_match or phone_match
     
     def to_dict(self):
         """Convert contact to dictionary with formatted timestamps"""

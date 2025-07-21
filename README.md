@@ -54,9 +54,12 @@ This project follows a task-by-task implementation approach. Current status:
 - [x] Task 1: Basic project structure setup
 - [x] Task 2: Database models implementation  
 - [x] Task 3: Request/response schemas
-- [x] Task 4: Core business logic and API endpoints
-- [ ] Task 5: Testing and refinement
-- [ ] Task 6: AWS Lambda deployment
+- [x] Task 4: Implement basic identity service
+- [x] Task 5: Add secondary contact logic
+- [ ] Task 6: Implement primary-to-secondary conversion
+- [ ] Task 7: Build consolidated response
+- [ ] Task 8: Create FastAPI endpoint
+- [ ] Task 9: Add comprehensive error handling
 
 ## Requirements
 
