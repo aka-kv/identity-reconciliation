@@ -2,6 +2,12 @@
 
 A serverless backend service for tracking and linking customer identities across multiple purchases. Built with FastAPI and deployed on AWS using Lambda, RDS, and API Gateway.
 
+## 🌐 Live Demo
+
+**Test the API**: [https://bitespeed-task-kv.netlify.app/](https://bitespeed-task-kv.netlify.app/)
+
+Interactive web interface to test the identity reconciliation API with various scenarios including new customers, validation errors, and edge cases.
+
 ## AWS Architecture
 
 ```
