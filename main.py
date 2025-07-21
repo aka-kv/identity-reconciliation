@@ -142,29 +142,19 @@ async def test_endpoint():
         "timestamp": datetime.utcnow().isoformat()
     }
 
-@app.get("/db-config")
-async def database_config():
-    """
-    Database configuration endpoint for debugging
-    """
-    return {
-        "rds_hostname": settings.RDS_HOSTNAME,
-        "rds_port": settings.RDS_PORT,
-        "rds_db_name": settings.RDS_DB_NAME,
-        "rds_username": settings.RDS_USERNAME,
-        "rds_password_set": bool(settings.RDS_PASSWORD),
-        "database_url_set": bool(settings.DATABASE_URL),
-        "database_url_contains_localhost": "localhost" in settings.DATABASE_URL if settings.DATABASE_URL else False,
-        "active_database_url": settings.get_active_database_url()[:50] + "..." if len(settings.get_active_database_url()) > 50 else settings.get_active_database_url(),
-        "lambda_environment": settings.is_lambda_environment(),
-        "environment": settings.ENVIRONMENT
-    }
 
 @app.get("/debug/contacts")
 async def debug_contacts():
     """
-    Debug endpoint to check database contents
+    Debug endpoint to check database contents (DEVELOPMENT ONLY)
     """
+    # SECURITY: Only allow in development environment
+    if not settings.DEBUG or settings.is_production():
+        raise HTTPException(
+            status_code=404,
+            detail="Endpoint not found"
+        )
+    
     try:
         from database import db_manager
         
