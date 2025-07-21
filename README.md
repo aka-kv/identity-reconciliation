@@ -30,7 +30,13 @@ identity_reconcilation/
    DATABASE_URL=postgresql://user:password@localhost:5432/identity_db
    ```
 
-3. **Run the Application**
+3. **Database Setup**
+   Create the database tables:
+   ```bash
+   python create_tables.py
+   ```
+
+4. **Run the Application**
    ```bash
    python main.py
    ```
@@ -44,7 +50,7 @@ identity_reconcilation/
 This project follows a task-by-task implementation approach. Current status:
 
 - [x] Task 1: Basic project structure setup
-- [ ] Task 2: Database models implementation
+- [x] Task 2: Database models implementation  
 - [ ] Task 3: Request/response schemas
 - [ ] Task 4: Core business logic
 - [ ] Task 5: API endpoints

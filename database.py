@@ -6,7 +6,6 @@ and AWS RDS deployments with connection pooling and error handling.
 """
 
 from sqlalchemy import create_engine, MetaData
-from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import logging
 from contextlib import contextmanager
@@ -15,8 +14,8 @@ from config import settings
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# SQLAlchemy base class for models
-Base = declarative_base()
+# Import Base from models to ensure all models are registered
+from models import Base
 
 # Database metadata for table operations
 metadata = MetaData()
