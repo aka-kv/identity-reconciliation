@@ -1,57 +1,73 @@
 """
-Base model class for Identity Reconciliation API
-This module provides the base model class with common fields
-and functionality that all database models inherit from.
-Includes timestamp fields and soft delete functionality.
+SQLAlchemy base configuration for Identity Reconciliation System
+This module sets up the SQLAlchemy declarative base and async engine
 """
 
-from sqlalchemy import Column, Integer, DateTime, func
-from sqlalchemy.ext.declarative import declarative_base
-from datetime import datetime
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
-# Base class for all database models
-Base = declarative_base()
+from config import settings
 
-class BaseModel(Base):
-    """
-    Base model class that provides common fields and functionality
-    for all database models. Includes automatic timestamp management
-    and soft delete capability.
-    """
-    __abstract__ = True
+# Global variables for lazy initialization
+engine = None
+AsyncSessionFactory = None
+
+def create_database_engine():
+    """Create database engine with appropriate settings for environment"""
+    database_url = settings.get_active_database_url()
     
-    # Primary key field - auto-incrementing integer
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    
-    # Timestamp fields with automatic management
-    created_at = Column(
-        DateTime(timezone=True), 
-        server_default=func.now(), 
-        nullable=False,
-        comment="Timestamp when record was created"
-    )
-    
-    updated_at = Column(
-        DateTime(timezone=True), 
-        server_default=func.now(), 
-        onupdate=func.now(), 
-        nullable=False,
-        comment="Timestamp when record was last updated"
-    )
-    
-    deleted_at = Column(
-        DateTime(timezone=True), 
-        nullable=True,
-        comment="Timestamp when record was soft deleted (NULL if not deleted)"
-    )
-    
-    def __repr__(self):
-        """String representation of the model"""
-        return f"<{self.__class__.__name__}(id={self.id})>"
-    
-    def to_dict(self):
-        """Convert model instance to dictionary"""
-        return {
-            column.name: getattr(self, column.name)
-            for column in self.__table__.columns
-        } 
+    if settings.is_lambda_environment():
+        # Lambda-optimized settings for RDS Proxy
+        return create_async_engine(
+            database_url,
+            echo=settings.DEBUG,
+            pool_pre_ping=True,  # Essential for Lambda - check connections
+            pool_size=1,  # Small pool for Lambda (single concurrent execution)
+            max_overflow=0,  # No overflow in Lambda
+            pool_recycle=3600,  # Recycle connections after 1 hour
+            pool_timeout=10,  # Quick timeout for Lambda
+            connect_args={
+                "command_timeout": 10,  # Quick command timeout
+                "server_settings": {
+                    "application_name": "identity-reconciliation-lambda",
+                }
+            }
+        )
+    else:
+        # Local development settings
+        return create_async_engine(
+            database_url,
+            echo=settings.DEBUG,
+            pool_pre_ping=True,
+            pool_size=5,  # Larger pool for local development
+            max_overflow=10,
+            connect_args={
+                "server_settings": {
+                    "application_name": "identity-reconciliation-local",
+                }
+            }
+        )
+
+def get_engine():
+    """Get database engine, creating it if necessary"""
+    global engine
+    if engine is None:
+        engine = create_database_engine()
+    return engine
+
+def get_session_factory():
+    """Get session factory, creating it if necessary"""
+    global AsyncSessionFactory
+    if AsyncSessionFactory is None:
+        AsyncSessionFactory = async_sessionmaker(
+            get_engine(),
+            class_=AsyncSession,
+            expire_on_commit=False,  # Don't expire objects after commit
+            autoflush=False  # Don't auto-flush - better control over operations
+        )
+    return AsyncSessionFactory
+
+class Base(DeclarativeBase):
+    """Base class for all SQLAlchemy models"""
+    pass 

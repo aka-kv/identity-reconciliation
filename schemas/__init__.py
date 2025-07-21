@@ -1,22 +1,13 @@
 """
-Pydantic schemas for Identity Reconciliation API
-Contains request/response models and data validation schemas
-for API endpoints and data transfer objects.
+API request/response schemas for Identity Reconciliation System
+Contains Pydantic models for validation and serialization
 """
 
-from .identify import (
-    IdentifyRequest,
-    ContactResponse, 
-    IdentifyResponse,
-    ErrorDetail,
-    ErrorResponse
-)
+from .identify import IdentifyRequest, IdentifyResponse, ContactResponse, ErrorResponse
 
-# Export all schemas for easy importing
 __all__ = [
-    "IdentifyRequest",
-    "ContactResponse",
-    "IdentifyResponse", 
-    "ErrorDetail",
-    "ErrorResponse"
-] 
+    'IdentifyRequest',
+    'IdentifyResponse', 
+    'ContactResponse',
+    'ErrorResponse'
+]

@@ -1,15 +1,9 @@
 """
-Database models for Identity Reconciliation API
-Contains SQLAlchemy model definitions for customer contact data
-and identity linking relationships.
+Database models package for Identity Reconciliation System
+Contains SQLAlchemy models for contact information and relationships
 """
 
-from .base import BaseModel, Base
+from .base import Base, engine, AsyncSessionFactory
 from .contact import Contact
 
-# Export all models for easy importing
-__all__ = [
-    "BaseModel",
-    "Base", 
-    "Contact"
-] 
+__all__ = ['Base', 'engine', 'AsyncSessionFactory', 'Contact'] 

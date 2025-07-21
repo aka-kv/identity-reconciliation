@@ -1,167 +1,82 @@
 """
-Contact model for Identity Reconciliation API
-This module defines the Contact database model for storing customer
-contact information and managing identity linking relationships.
-Supports primary/secondary contact hierarchy and soft delete functionality.
+Contact model for Identity Reconciliation System
+Represents customer contact information with linking relationships
 """
 
-from sqlalchemy import Column, String, Integer, ForeignKey, Index, CheckConstraint
-from sqlalchemy.orm import relationship
-from .base import BaseModel
+from datetime import datetime
+from typing import Optional
+from sqlalchemy import String, Integer, ForeignKey, DateTime, func
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from .base import Base
 
-class Contact(BaseModel):
+
+class Contact(Base):
     """
     Contact model representing customer contact information
     
-    Stores email and phone number data with linking relationships
-    to support identity reconciliation. Each contact can be either
-    'primary' (independent) or 'secondary' (linked to a primary contact).
-    
-    Database Table: contacts
+    Relationships:
+    - Primary contacts have linked_id = None, link_precedence = 'primary'
+    - Secondary contacts have linked_id pointing to primary, link_precedence = 'secondary'
     """
     __tablename__ = "contacts"
     
-    # Contact information fields - at least one must be provided
-    phone_number = Column(
-        String(20), 
-        nullable=True, 
-        index=True,
-        comment="Customer phone number in international format"
-    )
+    # Primary key
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     
-    email = Column(
-        String(255), 
-        nullable=True, 
-        index=True,
-        comment="Customer email address"
-    )
+    # Contact information (at least one must be provided)
+    phone_number: Mapped[Optional[str]] = mapped_column(String(20), index=True, nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(255), index=True, nullable=True)
     
-    # Identity linking fields
-    linked_id = Column(
+    # Linking information
+    linked_id: Mapped[Optional[int]] = mapped_column(
         Integer, 
-        ForeignKey("contacts.id", ondelete="CASCADE"), 
+        ForeignKey("contacts.id"), 
         nullable=True,
-        index=True,
-        comment="ID of the primary contact this secondary contact links to"
+        index=True
+    )
+    link_precedence: Mapped[str] = mapped_column(
+        String(10), 
+        nullable=False,
+        default="primary"
     )
     
-    link_precedence = Column(
-        String(10), 
-        nullable=False, 
-        default="primary",
-        comment="Either 'primary' (independent contact) or 'secondary' (linked contact)"
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), 
+        nullable=False,
+        server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), 
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now()
+    )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), 
+        nullable=True
     )
     
     # Relationships
-    linked_contact = relationship(
-        "Contact", 
-        remote_side=[BaseModel.id], 
-        backref="secondary_contacts",
-        comment="The primary contact this contact links to"
+    # Self-referential relationship for linked contacts
+    primary_contact: Mapped[Optional["Contact"]] = relationship(
+        "Contact",
+        remote_side=[id],
+        back_populates="secondary_contacts"
     )
     
-    # Database constraints
-    __table_args__ = (
-        # Ensure link_precedence is either 'primary' or 'secondary'
-        CheckConstraint(
-            link_precedence.in_(["primary", "secondary"]),
-            name="valid_link_precedence"
-        ),
-        
-        # Ensure at least one contact method is provided
-        CheckConstraint(
-            "(phone_number IS NOT NULL) OR (email IS NOT NULL)",
-            name="contact_info_required"
-        ),
-        
-        # Ensure secondary contacts have a linked_id
-        CheckConstraint(
-            "(link_precedence = 'primary' AND linked_id IS NULL) OR "
-            "(link_precedence = 'secondary' AND linked_id IS NOT NULL)",
-            name="secondary_must_have_linked_id"
-        ),
-        
-        # Composite indexes for efficient querying
-        Index("ix_contact_email_phone", email, phone_number),
-        Index("ix_contact_precedence_linked", link_precedence, linked_id),
+    secondary_contacts: Mapped[list["Contact"]] = relationship(
+        "Contact",
+        back_populates="primary_contact"
     )
     
-    def __repr__(self):
-        """String representation showing key contact information"""
-        return (
-            f"<Contact(id={self.id}, "
-            f"{self.get_contact_info_summary()}, "
-            f"precedence={self.link_precedence}"
-            f"{f', linked_to={self.linked_id}' if self.is_secondary() else ''})>"
-        )
+    def __repr__(self) -> str:
+        return f"<Contact(id={self.id}, email={self.email}, phone={self.phone_number}, precedence={self.link_precedence})>"
     
-    def is_primary(self):
-        """Check if this is a primary contact"""
-        return self.link_precedence == "primary"
+    def is_primary(self) -> bool:
+        """Check if this contact is a primary contact"""
+        return self.link_precedence == "primary" and self.linked_id is None
     
-    def is_secondary(self):
-        """Check if this is a secondary contact"""
-        return self.link_precedence == "secondary"
-    
-    def get_primary_contact(self):
-        """
-        Get the primary contact for this contact
-        Returns self if this is already primary, or the linked primary contact
-        """
-        if self.is_primary():
-            return self
-        return self.linked_contact
-    
-    def has_email(self):
-        """Check if this contact has an email"""
-        return self.email is not None and self.email.strip() != ""
-    
-    def has_phone(self):
-        """Check if this contact has a phone number"""
-        return self.phone_number is not None and self.phone_number.strip() != ""
-    
-    def get_contact_info_summary(self):
-        """Get a summary of this contact's information"""
-        info = []
-        if self.has_email():
-            info.append(f"email:{self.email}")
-        if self.has_phone():
-            info.append(f"phone:{self.phone_number}")
-        return ", ".join(info) if info else "no contact info"
-    
-    def matches_request(self, email=None, phone=None):
-        """
-        Check if this contact matches the given email or phone
-        Used for secondary contact logic
-        """
-        email_match = email and self.email == email
-        phone_match = phone and self.phone_number == phone
-        return email_match or phone_match
-    
-    def can_be_converted_to_secondary(self):
-        """
-        Check if this primary contact can be safely converted to secondary
-        Used during primary-to-secondary conversion validation
-        """
-        return self.is_primary() and self.deleted_at is None
-    
-    def get_creation_priority(self):
-        """
-        Get creation priority for primary contact linking decisions
-        Earlier created contacts have higher priority (lower number)
-        """
-        return self.created_at.timestamp() if self.created_at else float('inf')
-    
-    def to_dict(self):
-        """Convert contact to dictionary with formatted timestamps"""
-        data = super().to_dict()
-        
-        # Format datetime fields as ISO strings
-        if data.get("created_at"):
-            data["created_at"] = data["created_at"].isoformat()
-        if data.get("updated_at"):
-            data["updated_at"] = data["updated_at"].isoformat()
-        if data.get("deleted_at"):
-            data["deleted_at"] = data["deleted_at"].isoformat()
-            
-        return data 
+    def is_secondary(self) -> bool:
+        """Check if this contact is a secondary contact"""
+        return self.link_precedence == "secondary" and self.linked_id is not None

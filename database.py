@@ -1,119 +1,129 @@
 """
-Database connection and session management for Identity Reconciliation API
-This module sets up SQLAlchemy database connections with proper session management
-for both synchronous and asynchronous operations. Supports local PostgreSQL
-and AWS RDS deployments with connection pooling and error handling.
+Database initialization and management for Identity Reconciliation System
+Handles database connection, table creation, and basic operations
 """
 
-from sqlalchemy import create_engine, MetaData
-from sqlalchemy.orm import sessionmaker
-import logging
-from contextlib import contextmanager
+import asyncio
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
+from models.base import get_engine, get_session_factory, Base
+from models.contact import Contact
 from config import settings
 
-# Configure logging
-logger = logging.getLogger(__name__)
-
-# Import Base from models to ensure all models are registered
-from models import Base
-
-# Database metadata for table operations
-metadata = MetaData()
 
 class DatabaseManager:
-    """
-    Database connection manager that handles SQLAlchemy engine,
-    session creation, and connection lifecycle management
-    """
+    """Manages database operations and connections"""
     
     def __init__(self):
-        self.engine = None
-        self.SessionLocal = None
-        self._initialize_database()
+        self._engine = None
+        self._session_factory = None
     
-    def _initialize_database(self):
-        """Initialize database engine and session factory"""
-        try:
-            database_url = settings.get_active_database_url()
-            logger.info(f"Initializing database connection to: {database_url.split('@')[0]}@[HIDDEN]")
-            
-            # Create SQLAlchemy engine with connection pooling
-            self.engine = create_engine(
-                database_url,
-                pool_size=settings.DB_POOL_SIZE,
-                max_overflow=settings.DB_MAX_OVERFLOW,
-                pool_timeout=settings.DB_POOL_TIMEOUT,
-                pool_pre_ping=True,  # Validate connections before use
-                echo=settings.DEBUG  # Log SQL queries in debug mode
-            )
-            
-            # Create session factory
-            self.SessionLocal = sessionmaker(
-                autocommit=False,
-                autoflush=False,
-                bind=self.engine
-            )
-            
-            logger.info("Database connection initialized successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize database connection: {e}")
-            raise
+    @property
+    def engine(self):
+        """Get database engine with lazy initialization"""
+        if self._engine is None:
+            self._engine = get_engine()
+        return self._engine
     
-    def create_tables(self):
-        """Create all database tables defined in models"""
-        try:
-            logger.info("Creating database tables...")
-            Base.metadata.create_all(bind=self.engine)
-            logger.info("Database tables created successfully")
-        except Exception as e:
-            logger.error(f"Failed to create database tables: {e}")
-            raise
+    @property
+    def session_factory(self):
+        """Get session factory with lazy initialization"""
+        if self._session_factory is None:
+            self._session_factory = get_session_factory()
+        return self._session_factory
     
-    def test_connection(self):
+    async def create_tables(self):
+        """Create all database tables"""
+        async with self.engine.begin() as conn:
+            # Drop tables if they exist (for development)
+            await conn.run_sync(Base.metadata.drop_all)
+            # Create all tables
+            await conn.run_sync(Base.metadata.create_all)
+            print("✅ Database tables created successfully")
+    
+    async def create_indexes(self):
+        """Create additional database indexes for performance"""
+        async with self.engine.begin() as conn:
+            # Create composite index for email and phone lookup
+            await conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_contacts_email_phone 
+                ON contacts(email, phone_number) 
+                WHERE email IS NOT NULL OR phone_number IS NOT NULL
+            """))
+            
+            # Create partial indexes for better performance
+            await conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_contacts_email_not_null 
+                ON contacts(email) 
+                WHERE email IS NOT NULL
+            """))
+            
+            await conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_contacts_phone_not_null 
+                ON contacts(phone_number) 
+                WHERE phone_number IS NOT NULL
+            """))
+            
+            print("✅ Database indexes created successfully")
+    
+    async def test_connection(self):
         """Test database connection"""
         try:
-            with self.engine.connect() as connection:
-                connection.execute("SELECT 1")
-                logger.info("Database connection test successful")
-                return True
+            # Get the active database URL to see what we're trying to connect to
+            active_url = settings.get_active_database_url()
+            print(f"🔗 Attempting to connect to: {active_url[:50]}...")
+            
+            # Check if we have proper database configuration
+            if settings.RDS_HOSTNAME and settings.RDS_HOSTNAME != "localhost":
+                if not settings.RDS_PASSWORD:
+                    print("❌ RDS hostname provided but no password set")
+                    return False
+                print(f"🌐 Using RDS configuration: {settings.RDS_HOSTNAME}")
+            else:
+                print("🏠 Using local database configuration")
+            
+            async with self.session_factory() as session:
+                result = await session.execute(text("SELECT 1"))
+                row = result.fetchone()
+                if row and row[0] == 1:
+                    print("✅ Database connection successful")
+                    return True
+                else:
+                    print("❌ Database connection test failed")
+                    return False
         except Exception as e:
-            logger.error(f"Database connection test failed: {e}")
+            print(f"❌ Database connection error: {e}")
             return False
     
-    @contextmanager
-    def get_session(self):
-        """
-        Context manager for database sessions with automatic cleanup
-        Usage: 
-            with db_manager.get_session() as session:
-                # database operations
-        """
-        session = self.SessionLocal()
-        try:
-            yield session
-            session.commit()
-        except Exception as e:
-            session.rollback()
-            logger.error(f"Database session error: {e}")
-            raise
-        finally:
-            session.close()
-    
-    def get_db_session(self):
-        """
-        Generator function for FastAPI dependency injection
-        Provides database session for API endpoints
-        """
-        session = self.SessionLocal()
-        try:
-            yield session
-        except Exception as e:
-            session.rollback()
-            logger.error(f"FastAPI database session error: {e}")
-            raise
-        finally:
-            session.close()
+    def get_session(self) -> AsyncSession:
+        """Get an async database session"""
+        return self.session_factory()
+
 
 # Global database manager instance
-db_manager = DatabaseManager() 
+db_manager = DatabaseManager()
+
+
+async def init_database():
+    """Initialize database with tables and indexes"""
+    print("🔄 Initializing database...")
+    
+    # Test connection first
+    if not await db_manager.test_connection():
+        print("❌ Cannot connect to database. Please check your DATABASE_URL")
+        return False
+    
+    # Create tables
+    await db_manager.create_tables()
+    
+    # Create indexes
+    await db_manager.create_indexes()
+    
+    print("✅ Database initialization complete!")
+    return True
+
+
+if __name__ == "__main__":
+    """Run database initialization"""
+    print(f"Database URL: {settings.DATABASE_URL}")
+    asyncio.run(init_database())

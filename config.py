@@ -1,76 +1,116 @@
 """
-Configuration settings for Identity Reconciliation API
-This module handles all environment variables and application settings
-for database connections, API configuration, and deployment environments.
-Supports both local development and AWS Lambda deployment.
+Configuration settings for Identity Reconciliation System
+Manages database connections, API settings, and environment variables
+Compatible with Python 3.7+ and handles both local and AWS deployment
 """
 
 import os
-from dotenv import load_dotenv
-
-# Load environment variables from .env file if it exists
-load_dotenv()
+from typing import Optional
 
 class Settings:
     """
-    Application settings class that manages all configuration
-    from environment variables with sensible defaults
+    Application configuration class that loads settings from environment variables
+    with fallback defaults for local development
     """
     
+    # Database Configuration
+    DATABASE_URL: str = os.getenv(
+        "DATABASE_URL", 
+        "postgresql+asyncpg://postgres:kv2k04@localhost:5432/identity_reconciliation"
+    )
+    
+    # RDS Configuration (for AWS deployment)
+    RDS_HOSTNAME: str = os.getenv("RDS_HOSTNAME", "localhost")
+    RDS_PORT: str = os.getenv("RDS_PORT", "5432")
+    RDS_DB_NAME: str = os.getenv("RDS_DB_NAME", "identity_reconciliation")
+    RDS_USERNAME: str = os.getenv("RDS_USERNAME", "postgres")
+    RDS_PASSWORD: str = os.getenv("RDS_PASSWORD", "")
+    
+    # SSL Configuration for RDS
+    DB_SSL_MODE: str = os.getenv("DB_SSL_MODE", "prefer")  # require, prefer, disable
+    
     # API Configuration
-    API_TITLE = "Identity Reconciliation API"
-    API_DESCRIPTION = "Customer identity linking and reconciliation service"
-    API_VERSION = "1.0.0"
+    API_TITLE: str = "Identity Reconciliation API"
+    API_VERSION: str = "1.0.0"
+    API_DESCRIPTION: str = "Backend service for tracking and linking customer identities"
     
     # Server Configuration
-    HOST = os.getenv("HOST", "0.0.0.0")
-    PORT = int(os.getenv("PORT", 8000))
-    DEBUG = os.getenv("DEBUG", "false").lower() == "true"
-    ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+    HOST: str = os.getenv("HOST", "0.0.0.0")
+    PORT: int = int(os.getenv("PORT", "8000"))
     
-    # Database Configuration
-    DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/identity_db")
+    # Environment
+    ENVIRONMENT: str = os.getenv("ENVIRONMENT", "development")
+    DEBUG: bool = os.getenv("DEBUG", "True").lower() == "true"
     
-    # AWS RDS Configuration (for production)
-    RDS_HOSTNAME = os.getenv("RDS_HOSTNAME", "localhost")
-    RDS_PORT = int(os.getenv("RDS_PORT", 5432))
-    RDS_DB_NAME = os.getenv("RDS_DB_NAME", "identity_db")
-    RDS_USERNAME = os.getenv("RDS_USERNAME", "user")
-    RDS_PASSWORD = os.getenv("RDS_PASSWORD", "password")
-    
-    # Database Connection Settings
-    DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", 5))
-    DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", 10))
-    DB_POOL_TIMEOUT = int(os.getenv("DB_POOL_TIMEOUT", 30))
-    DB_SSL_MODE = os.getenv("DB_SSL_MODE", "prefer")
-    
-    # CORS Configuration
-    CORS_ORIGINS = [
-        "http://localhost:3000",
-        "http://localhost:8000",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:8000"
-    ]
+    # AWS Configuration (for future deployment)
+    AWS_REGION: str = os.getenv("AWS_REGION", "us-east-1")
     
     # Logging Configuration
-    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     
-    def get_active_database_url(self):
-        """
-        Returns the appropriate database URL based on environment
-        Uses RDS configuration if available, otherwise falls back to DATABASE_URL
-        """
-        if self.is_lambda_environment() or self.RDS_HOSTNAME != "localhost":
-            return (
-                f"postgresql://{self.RDS_USERNAME}:{self.RDS_PASSWORD}"
-                f"@{self.RDS_HOSTNAME}:{self.RDS_PORT}/{self.RDS_DB_NAME}"
-                f"?sslmode={self.DB_SSL_MODE}"
-            )
-        return self.DATABASE_URL
+    # CORS Configuration
+    CORS_ORIGINS: list = ["*"]  # In production, this should be more restrictive
     
-    def is_lambda_environment(self):
-        """Check if running in AWS Lambda environment"""
+    @classmethod
+    def get_database_url(cls) -> str:
+        """
+        Get the database URL for the current environment
+        Ensures proper async driver is used
+        """
+        # If a DATABASE_URL is provided in environment, ensure it uses asyncpg
+        if "postgresql://" in cls.DATABASE_URL and "asyncpg" not in cls.DATABASE_URL:
+            return cls.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
+        return cls.DATABASE_URL
+    
+    @classmethod
+    def get_rds_database_url(cls) -> str:
+        """
+        Build RDS database URL from individual components
+        Used when deploying to AWS with RDS
+        """
+        if cls.RDS_PASSWORD:
+            auth = f"{cls.RDS_USERNAME}:{cls.RDS_PASSWORD}"
+        else:
+            auth = cls.RDS_USERNAME
+            
+        base_url = f"postgresql+asyncpg://{auth}@{cls.RDS_HOSTNAME}:{cls.RDS_PORT}/{cls.RDS_DB_NAME}"
+        
+        # Add SSL configuration for RDS (asyncpg uses 'ssl' parameter, not 'sslmode')
+        if cls.DB_SSL_MODE != "disable":
+            if cls.DB_SSL_MODE == "require":
+                base_url += "?ssl=require"
+            elif cls.DB_SSL_MODE == "prefer":
+                base_url += "?ssl=prefer"
+            else:
+                base_url += "?ssl=true"
+            
+        return base_url
+    
+    @classmethod
+    def get_active_database_url(cls) -> str:
+        """
+        Get the appropriate database URL based on environment
+        Uses RDS configuration if RDS_HOSTNAME is set and not localhost, otherwise uses DATABASE_URL
+        """
+        # If we have RDS configuration (hostname is not localhost and password is set), use RDS
+        if cls.RDS_HOSTNAME and cls.RDS_HOSTNAME != "localhost" and cls.RDS_PASSWORD:
+            return cls.get_rds_database_url()
+        # Otherwise use the DATABASE_URL
+        return cls.get_database_url()
+    
+    @classmethod
+    def is_production(cls) -> bool:
+        """
+        Check if we're running in production environment
+        """
+        return cls.ENVIRONMENT.lower() == "production"
+    
+    @classmethod
+    def is_lambda_environment(cls) -> bool:
+        """
+        Check if we're running in AWS Lambda
+        """
         return os.getenv("AWS_LAMBDA_FUNCTION_NAME") is not None
 
-# Global settings instance
+# Create a global settings instance
 settings = Settings() 

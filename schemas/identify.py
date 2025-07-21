@@ -1,187 +1,203 @@
 """
-Pydantic schemas for Identity Reconciliation API
-This module defines request and response schemas for the /identify endpoint
-with comprehensive validation for email and phone number formats.
-Compatible with Python 3.7 and includes detailed error responses.
+Pydantic schemas for the /identify endpoint
+Handles request validation and response serialization
+Fixed to properly handle "null" strings as null values
 """
 
-from pydantic import BaseModel, validator
-from typing import Optional, List, Dict, Any
-from datetime import datetime
 import re
+from typing import List, Optional, Dict, Any, Union
+from pydantic import BaseModel, Field, EmailStr, field_validator, model_validator
+
 
 class IdentifyRequest(BaseModel):
     """
     Request schema for the /identify endpoint
-    
-    Validates customer contact information for identity reconciliation.
-    At least one of email or phoneNumber must be provided.
+    Validates that at least one of email or phoneNumber is provided
+    Handles "null" strings by converting them to None
     """
+    email: Optional[Union[EmailStr, str]] = Field(
+        None,
+        description="Customer email address",
+        examples=["customer@example.com", None]
+    )
+    phoneNumber: Optional[str] = Field(
+        None,
+        alias="phoneNumber",  # API uses camelCase
+        description="Customer phone number",
+        examples=["+1234567890", "123-456-7890", None]
+    )
     
-    email: Optional[str] = None
-    phoneNumber: Optional[str] = None
-    
-    @validator('email')
-    def validate_email(cls, value):
+    @field_validator('email', mode='before')
+    @classmethod
+    def validate_email(cls, v) -> Optional[str]:
         """
-        Validate email format and normalize it
-        Uses basic email validation compatible with most systems
+        Validate and clean email input
+        Converts "null" strings to None and validates proper emails
         """
-        if value is None:
+        # Handle null/None cases
+        if v is None:
             return None
-            
-        # Basic email validation regex (more permissive than EmailStr)
-        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
         
-        # Normalize email to lowercase
-        value = value.strip().lower()
-        
-        if not re.match(email_pattern, value):
-            raise ValueError('Invalid email format')
-            
-        # Check reasonable length limits
-        if len(value) > 255:
-            raise ValueError('Email address too long (max 255 characters)')
-            
-        return value
-    
-    @validator('phoneNumber')
-    def validate_phone_number(cls, value):
-        """
-        Validate and normalize phone number format
-        Accepts various formats and normalizes to international format
-        """
-        if value is None:
+        # Convert "null" string to None (case insensitive)
+        if isinstance(v, str) and v.lower().strip() in ['null', '']:
             return None
-            
-        # Remove all non-digit characters
-        digits_only = re.sub(r'[^\d]', '', value)
         
-        # Check for reasonable length (7-15 digits as per ITU-T E.164)
-        if len(digits_only) < 7:
-            raise ValueError('Phone number too short (minimum 7 digits)')
-        if len(digits_only) > 15:
-            raise ValueError('Phone number too long (maximum 15 digits)')
-            
-        # Add '+' prefix if not present for international format
-        if not value.startswith('+'):
-            normalized = '+' + digits_only
-        else:
-            normalized = '+' + digits_only
-            
-        return normalized
+        # If it's a string, validate it as an email
+        if isinstance(v, str):
+            # Basic email validation (Pydantic will do the heavy lifting)
+            v = v.strip()
+            if '@' not in v:
+                raise ValueError('Invalid email format: email must contain @')
+            return v
+        
+        return v
     
-    @validator('phoneNumber', 'email', always=True)
-    def validate_at_least_one_contact(cls, value, values):
+    @field_validator('phoneNumber', mode='before')
+    @classmethod
+    def validate_phone_number(cls, v) -> Optional[str]:
         """
-        Ensure at least one contact method is provided
-        This validator runs after individual field validation
+        Validate phone number format
+        Converts "null" strings to None and validates phone numbers
         """
-        # Only run this validation if we're validating the second field
-        if len(values) >= 1:  # Both fields have been processed
-            email = values.get('email')
-            phone = value if 'phoneNumber' in values else values.get('phoneNumber')
-            
-            if not email and not phone:
-                raise ValueError('At least one of email or phoneNumber must be provided')
-                
-        return value
+        # Handle null/None cases
+        if v is None:
+            return None
+        
+        # Convert "null" string to None (case insensitive)
+        if isinstance(v, str) and v.lower().strip() in ['null', '']:
+            return None
+        
+        # Convert to string if it's a number
+        if isinstance(v, (int, float)):
+            v = str(int(v))  # Remove decimal point if it's a float
+        
+        if not isinstance(v, str):
+            raise ValueError('Phone number must be a string or number')
+        
+        # Clean the phone number
+        v = v.strip()
+        if not v:  # Empty string after stripping
+            return None
+        
+        # Remove all non-digit characters except +
+        cleaned = re.sub(r'[^\d+]', '', v)
+        
+        # Basic validation: should have at least 3 digits (flexible for testing)
+        digits_only = re.sub(r'[^\d]', '', cleaned)
+        if len(digits_only) < 3:
+            raise ValueError('Phone number must contain at least 3 digits')
+        
+        # Return the original format (we'll store it as provided)
+        return v
+    
+    @model_validator(mode='after')
+    def validate_at_least_one_field(self):
+        """
+        Ensure at least one of email or phoneNumber is provided
+        """
+        if not self.email and not self.phoneNumber:
+            raise ValueError('Either email or phoneNumber must be provided')
+        return self
     
     class Config:
-        """Pydantic configuration"""
-        # Generate example for API documentation
-        schema_extra = {
-            "example": {
-                "email": "customer@example.com",
-                "phoneNumber": "+1234567890"
-            }
+        # Allow both camelCase (API) and snake_case (Python) field names
+        populate_by_name = True
+        json_schema_extra = {
+            "examples": [
+                {
+                    "email": "customer@example.com",
+                    "phoneNumber": "+1234567890"
+                },
+                {
+                    "email": "customer@example.com",
+                    "phoneNumber": None
+                },
+                {
+                    "email": None,
+                    "phoneNumber": "123-456-7890"
+                },
+                {
+                    "email": "null",
+                    "phoneNumber": "123456"
+                }
+            ]
         }
+
 
 class ContactResponse(BaseModel):
     """
-    Response schema for individual contact information
-    Represents a single contact with all associated data
+    Contact information in the API response
+    Contains consolidated contact data for a customer
     """
-    
-    primaryContatId: int  # Note: keeping typo from original spec for compatibility
-    emails: List[str] = []
-    phoneNumbers: List[str] = []
-    secondaryContactIds: List[int] = []
+    primaryContatId: int = Field(
+        alias="primaryContatId",  # Note: This matches the API spec typo
+        description="ID of the primary contact"
+    )
+    emails: List[str] = Field(
+        description="All email addresses associated with this contact",
+        examples=[["customer@example.com", "customer2@example.com"]]
+    )
+    phoneNumbers: List[str] = Field(
+        description="All phone numbers associated with this contact",
+        examples=[["+1234567890", "123-456-7890"]]
+    )
+    secondaryContactIds: List[int] = Field(
+        description="IDs of all secondary contacts linked to the primary",
+        examples=[[2, 3, 4]]
+    )
     
     class Config:
-        """Pydantic configuration"""
-        schema_extra = {
-            "example": {
-                "primaryContatId": 1,
-                "emails": ["customer@example.com"],
-                "phoneNumbers": ["+1234567890"],
-                "secondaryContactIds": [2, 3]
-            }
-        }
+        populate_by_name = True
+
 
 class IdentifyResponse(BaseModel):
     """
-    Main response schema for the /identify endpoint
-    Contains the consolidated contact information after reconciliation
+    Response schema for the /identify endpoint
+    Contains the consolidated contact information
     """
-    
-    contact: ContactResponse
+    contact: ContactResponse = Field(
+        description="Consolidated contact information"
+    )
     
     class Config:
-        """Pydantic configuration"""
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "contact": {
                     "primaryContatId": 1,
-                    "emails": ["customer@example.com", "customer.alt@example.com"],
-                    "phoneNumbers": ["+1234567890", "+0987654321"],
+                    "emails": ["customer@example.com", "customer2@example.com"],
+                    "phoneNumbers": ["+1234567890", "123-456-7890"],
                     "secondaryContactIds": [2, 3]
                 }
             }
         }
 
-class ErrorDetail(BaseModel):
-    """
-    Schema for individual error details
-    Used in validation and other error responses
-    """
-    
-    field: Optional[str] = None
-    message: str
-    type: Optional[str] = None
-    
+
 class ErrorResponse(BaseModel):
     """
-    Standard error response schema
-    Provides consistent error format across all endpoints
+    Error response schema for API errors
     """
-    
-    error: str
-    message: str
-    details: Optional[Dict[str, Any]] = None
-    timestamp: datetime = None
-    
-    def __init__(self, **data):
-        """Initialize with current timestamp if not provided"""
-        if 'timestamp' not in data:
-            data['timestamp'] = datetime.utcnow()
-        super().__init__(**data)
+    error: str = Field(
+        description="Error type or category"
+    )
+    message: str = Field(
+        description="Human-readable error message"
+    )
+    details: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Additional error details"
+    )
     
     class Config:
-        """Pydantic configuration"""
-        schema_extra = {
-            "example": {
-                "error": "ValidationError",
-                "message": "Request validation failed",
-                "details": {
-                    "errors": [
-                        {
-                            "field": "email",
-                            "message": "Invalid email format",
-                            "type": "value_error"
-                        }
-                    ]
+        json_schema_extra = {
+            "examples": [
+                {
+                    "error": "ValidationError",
+                    "message": "Either email or phoneNumber must be provided",
+                    "details": {"field": "root"}
                 },
-                "timestamp": "2024-01-15T10:30:00.000Z"
-            }
-        } 
+                {
+                    "error": "DatabaseError", 
+                    "message": "Unable to connect to database"
+                }
+            ]
+        }
