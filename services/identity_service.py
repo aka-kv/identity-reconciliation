@@ -9,6 +9,7 @@ from typing import List, Optional, Set
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_
 import logging
+import traceback
 from datetime import datetime
 
 from models import Contact
@@ -30,6 +31,21 @@ class IdentityService:
         """Initialize the identity service"""
         pass
     
+    def _validate_identify_request(self, request: IdentifyRequest):
+        """
+        Validate identify request data before processing
+        """
+        if not request.email and not request.phoneNumber:
+            raise ValueError("At least one of email or phoneNumber must be provided")
+        
+        if request.email and len(request.email.strip()) == 0:
+            raise ValueError("Email cannot be empty string")
+        
+        if request.phoneNumber and len(request.phoneNumber.strip()) == 0:
+            raise ValueError("Phone number cannot be empty string")
+        
+        logger.debug(f"Request validation passed for email={request.email}, phone={request.phoneNumber}")
+    
     async def identify_contact(self, request: IdentifyRequest) -> IdentifyResponse:
         """
         Main method to identify and reconcile customer contacts
@@ -44,47 +60,62 @@ class IdentityService:
         """
         logger.info(f"Processing identity request: email={request.email}, phone={request.phoneNumber}")
         
-        with db_manager.get_session() as session:
-            # Step 1: Find existing contacts
-            existing_contacts = self._find_existing_contacts(session, request.email, request.phoneNumber)
+        try:
+            # Validate input data
+            self._validate_identify_request(request)
             
-            if not existing_contacts:
-                # Step 2: No matches - create new primary contact
-                logger.info("No existing contacts found - creating new primary contact")
-                primary_contact = self._create_primary_contact(session, request.email, request.phoneNumber)
-                return self._build_response(session, primary_contact)
-            
-            # Step 2.5: Analyze the type of matches we found
-            match_analysis = self._analyze_contact_matches(existing_contacts, request.email, request.phoneNumber)
-            
-            # Step 3: Handle existing contacts based on secondary contact logic
-            primary_contacts = [c for c in existing_contacts if c.is_primary()]
-            
-            if len(primary_contacts) == 0:
-                # All existing contacts are secondary - handle partial match scenario
-                logger.info("Found only secondary contacts - handling partial match")
-                primary_contact = self._handle_partial_match_scenario(
-                    session, existing_contacts, request.email, request.phoneNumber
-                )
-                return self._build_response(session, primary_contact)
-            
-            elif len(primary_contacts) == 1:
-                # Single primary contact found - handle secondary contact creation
-                logger.info("Found single primary contact - checking for secondary contact needs")
-                primary_contact = self._handle_partial_match_scenario(
-                    session, existing_contacts, request.email, request.phoneNumber
-                )
-                return self._build_response(session, primary_contact)
-            
-            else:
-                # Multiple primary contacts found - need to link them with complex scenario handling
-                logger.info(f"Found {len(primary_contacts)} primary contacts - initiating complex linking process")
-                primary_contact = self._handle_complex_linking_scenario(session, primary_contacts, request.email, request.phoneNumber)
+            with db_manager.get_session() as session:
+                # Step 1: Find existing contacts
+                existing_contacts = self._find_existing_contacts(session, request.email, request.phoneNumber)
                 
-                # Ensure data integrity after complex conversion
-                self._ensure_data_integrity_after_conversion(session, primary_contact)
+                if not existing_contacts:
+                    # Step 2: No matches - create new primary contact
+                    logger.info("No existing contacts found - creating new primary contact")
+                    primary_contact = self._create_primary_contact(session, request.email, request.phoneNumber)
+                    return self._build_response(session, primary_contact)
                 
-                return self._build_response(session, primary_contact)
+                # Step 2.5: Analyze the type of matches we found
+                match_analysis = self._analyze_contact_matches(existing_contacts, request.email, request.phoneNumber)
+                
+                # Step 3: Handle existing contacts based on secondary contact logic
+                primary_contacts = [c for c in existing_contacts if c.is_primary()]
+                
+                if len(primary_contacts) == 0:
+                    # All existing contacts are secondary - handle partial match scenario
+                    logger.info("Found only secondary contacts - handling partial match")
+                    primary_contact = self._handle_partial_match_scenario(
+                        session, existing_contacts, request.email, request.phoneNumber
+                    )
+                    return self._build_response(session, primary_contact)
+                
+                elif len(primary_contacts) == 1:
+                    # Single primary contact found - handle secondary contact creation
+                    logger.info("Found single primary contact - checking for secondary contact needs")
+                    primary_contact = self._handle_partial_match_scenario(
+                        session, existing_contacts, request.email, request.phoneNumber
+                    )
+                    return self._build_response(session, primary_contact)
+                
+                else:
+                    # Multiple primary contacts found - need to link them with complex scenario handling
+                    logger.info(f"Found {len(primary_contacts)} primary contacts - initiating complex linking process")
+                    primary_contact = self._handle_complex_linking_scenario(session, primary_contacts, request.email, request.phoneNumber)
+                    
+                    # Ensure data integrity after complex conversion
+                    self._ensure_data_integrity_after_conversion(session, primary_contact)
+                    
+                    return self._build_response(session, primary_contact)
+        
+        except ValueError as e:
+            logger.error(f"Validation error in identify_contact: {e}")
+            raise
+        except ConnectionError as e:
+            logger.error(f"Database connection error in identify_contact: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error in identify_contact: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise
     
     def _find_existing_contacts(self, session: Session, email: Optional[str], phone: Optional[str]) -> List[Contact]:
         """

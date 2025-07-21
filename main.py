@@ -43,7 +43,7 @@ app.add_middleware(
 # Exception handlers
 @app.exception_handler(ValidationError)
 async def validation_exception_handler(request: Request, exc: ValidationError):
-    """Handle Pydantic validation errors"""
+    """Handle Pydantic validation errors with detailed field information"""
     logger.warning(f"Validation error for {request.url}: {exc}")
     
     error_details = []
@@ -51,34 +51,127 @@ async def validation_exception_handler(request: Request, exc: ValidationError):
         error_details.append({
             "field": " -> ".join(str(x) for x in error["loc"]),
             "message": error["msg"],
-            "type": error["type"]
+            "type": error["type"],
+            "input": error.get("input")
         })
     
     error_response = ErrorResponse(
         error="ValidationError",
         message="Request validation failed",
-        details={"errors": error_details}
+        details={"errors": error_details, "total_errors": len(error_details)}
     )
     
     return JSONResponse(
         status_code=400,
-        content=error_response.dict()
+        content=error_response.dict(),
+        headers={"X-Error-Type": "ValidationError"}
+    )
+
+@app.exception_handler(ValueError)
+async def value_error_handler(request: Request, exc: ValueError):
+    """Handle ValueError exceptions from business logic"""
+    logger.warning(f"Value error for {request.url}: {exc}")
+    
+    error_response = ErrorResponse(
+        error="BusinessLogicError",
+        message=str(exc),
+        details={"error_type": "ValueError"}
+    )
+    
+    return JSONResponse(
+        status_code=422,
+        content=error_response.dict(),
+        headers={"X-Error-Type": "BusinessLogicError"}
+    )
+
+@app.exception_handler(ConnectionError)
+async def connection_error_handler(request: Request, exc: ConnectionError):
+    """Handle database connection errors"""
+    logger.error(f"Database connection error for {request.url}: {exc}")
+    
+    error_response = ErrorResponse(
+        error="DatabaseConnectionError",
+        message="Database is currently unavailable. Please try again later.",
+        details={"error_type": "ConnectionError"}
+    )
+    
+    return JSONResponse(
+        status_code=503,
+        content=error_response.dict(),
+        headers={"X-Error-Type": "DatabaseConnectionError", "Retry-After": "30"}
+    )
+
+@app.exception_handler(TimeoutError)
+async def timeout_error_handler(request: Request, exc: TimeoutError):
+    """Handle request timeout errors"""
+    logger.error(f"Timeout error for {request.url}: {exc}")
+    
+    error_response = ErrorResponse(
+        error="RequestTimeoutError",
+        message="Request timed out. Please try again.",
+        details={"error_type": "TimeoutError"}
+    )
+    
+    return JSONResponse(
+        status_code=408,
+        content=error_response.dict(),
+        headers={"X-Error-Type": "RequestTimeoutError"}
+    )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Handle FastAPI HTTP exceptions with consistent error format"""
+    logger.warning(f"HTTP exception for {request.url}: {exc.status_code} - {exc.detail}")
+    
+    # If detail is already an ErrorResponse dict, use it as is
+    if isinstance(exc.detail, dict) and "error" in exc.detail:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=exc.detail,
+            headers=getattr(exc, "headers", {})
+        )
+    
+    # Otherwise, wrap in ErrorResponse format
+    error_response = ErrorResponse(
+        error="HTTPException",
+        message=str(exc.detail),
+        details={"status_code": exc.status_code}
+    )
+    
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=error_response.dict(),
+        headers=getattr(exc, "headers", {})
     )
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
-    """Handle unexpected errors"""
-    logger.error(f"Unexpected error for {request.url}: {exc}")
-    logger.error(f"Traceback: {traceback.format_exc()}")
+    """Handle unexpected errors with detailed logging"""
+    error_id = f"error_{hash(str(exc))}"
+    logger.error(f"Unexpected error [{error_id}] for {request.url}: {exc}")
+    logger.error(f"Traceback [{error_id}]: {traceback.format_exc()}")
     
-    error_response = ErrorResponse(
-        error="InternalServerError",
-        message="An unexpected error occurred"
-    )
+    # Check for specific error types in the exception message
+    error_str = str(exc).lower()
+    if any(db_error in error_str for db_error in ['connect', 'timeout', 'connection', 'database']):
+        error_response = ErrorResponse(
+            error="DatabaseError",
+            message="Database operation failed. Please try again later.",
+            details={"error_id": error_id, "error_type": type(exc).__name__}
+        )
+        status_code = 503
+    else:
+        error_response = ErrorResponse(
+            error="InternalServerError",
+            message="An unexpected error occurred. Please contact support if the issue persists.",
+            details={"error_id": error_id, "error_type": type(exc).__name__}
+        )
+        status_code = 500
     
     return JSONResponse(
-        status_code=500,
-        content=error_response.dict()
+        status_code=status_code,
+        content=error_response.dict(),
+        headers={"X-Error-ID": error_id, "X-Error-Type": "InternalServerError"}
     )
 
 @app.get("/")
